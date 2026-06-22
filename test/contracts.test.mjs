@@ -117,7 +117,7 @@ describe("EventEnvelopeSchema", () => {
       eventId: "evt_123",
       eventType: EVENTS.ORDER_PAID,
       timestamp: new Date().toISOString(),
-      source: "graf",
+      source: "hermes",
       data: VALID_PAYLOADS[EVENTS.ORDER_PAID],
       signature: "sha256=abc",
       idempotencyKey: "idem-1",
@@ -126,14 +126,14 @@ describe("EventEnvelopeSchema", () => {
     const result = EventEnvelopeSchema.safeParse(envelope);
     assert.equal(result.success, true, JSON.stringify(result.error?.issues));
     assert.equal(result.data.priority, "high");
-    assert.equal(result.data.source, "graf");
+    assert.equal(result.data.source, "hermes");
   });
 
   test("falla si falta eventId", () => {
     const envelope = {
       eventType: EVENTS.ORDER_PAID,
       timestamp: new Date().toISOString(),
-      source: "graf",
+      source: "hermes",
       data: {},
     };
     const result = EventEnvelopeSchema.safeParse(envelope);
@@ -172,7 +172,7 @@ describe("validateEvent", () => {
       eventId: "evt_v1",
       eventType: EVENTS.ORDER_PAID,
       timestamp: new Date().toISOString(),
-      source: "graf",
+      source: "hermes",
       data: VALID_PAYLOADS[EVENTS.ORDER_PAID],
     });
     const result = validateEvent(env);
@@ -184,7 +184,7 @@ describe("validateEvent", () => {
       eventId: "evt_i1",
       eventType: EVENTS.ORDER_PAID,
       timestamp: new Date().toISOString(),
-      source: "graf",
+      source: "hermes",
       data: { orderId: 999, total: -999 }, // invalid data for ORDER_PAID
     });
     const result = validateEvent(env);
@@ -267,24 +267,24 @@ describe("HubClient", () => {
   test("publica un evento y retorna true con 200 OK", async () => {
     const mock = mockFetch(() => ({ ok: true, status: 200 }));
     try {
-      const client = new HubClient({ source: "graf", hubUrl: "http://hub-test:3007" });
+      const client = new HubClient({ source: "hermes", hubUrl: "http://hub-test:3007" });
       const ok = await client.publish(EVENTS.ORDER_PAID, VALID_PAYLOADS[EVENTS.ORDER_PAID]);
       assert.equal(ok, true);
       assert.equal(mock.calls.length, 1);
-      assert.ok(mock.calls[0].url.includes("/webhooks/hubcentral"));
+      assert.ok(mock.calls[0].url.includes("/webhooks/nous"));
     } finally {
       mock.restore();
     }
   });
 
-  test("publica con firma en header x-cauce-signature cuando secret está configurado", async () => {
+  test("publica con firma en header x-prizma-signature cuando secret está configurado", async () => {
     const mock = mockFetch(() => ({ ok: true, status: 200 }));
     try {
-      const client = new HubClient({ source: "sinergia", hubUrl: "http://hub-test:3007", secret: "my-secret" });
+      const client = new HubClient({ source: "talanton", hubUrl: "http://hub-test:3007", secret: "my-secret" });
       await client.publish(EVENTS.POS_SALE_CREATED, VALID_PAYLOADS[EVENTS.POS_SALE_CREATED]);
       const headers = mock.calls[0].opts.headers;
-      assert.ok(headers["x-cauce-signature"], "debe incluir x-cauce-signature");
-      assert.match(headers["x-cauce-signature"], /^sha256=[0-9a-f]{64}$/);
+      assert.ok(headers["x-prizma-signature"], "debe incluir x-prizma-signature");
+      assert.match(headers["x-prizma-signature"], /^sha256=[0-9a-f]{64}$/);
     } finally {
       mock.restore();
     }
@@ -308,7 +308,7 @@ describe("HubClient", () => {
   test("tolerante a fallos: no lanza con throwOnError=false (500)", async () => {
     const mock = mockFetch(() => ({ ok: false, status: 500 }));
     try {
-      const client = new HubClient({ source: "graf", hubUrl: "http://hub-test:3007" });
+      const client = new HubClient({ source: "hermes", hubUrl: "http://hub-test:3007" });
       // throwOnError defaults to undefined (falsy) → should not throw
       const ok = await client.publish(EVENTS.ORDER_PAID, VALID_PAYLOADS[EVENTS.ORDER_PAID]);
       assert.equal(ok, false);
@@ -320,7 +320,7 @@ describe("HubClient", () => {
   test("tolerante a fallos: no lanza con throwOnError=false (network error)", async () => {
     const mock = mockFetch(() => { throw new Error("ECONNREFUSED"); });
     try {
-      const client = new HubClient({ source: "graf", hubUrl: "http://nowhere:9999" });
+      const client = new HubClient({ source: "hermes", hubUrl: "http://nowhere:9999" });
       const ok = await client.publish(EVENTS.ORDER_PAID, VALID_PAYLOADS[EVENTS.ORDER_PAID]);
       assert.equal(ok, false);
     } finally {
@@ -331,7 +331,7 @@ describe("HubClient", () => {
   test("lanza con throwOnError=true cuando servidor retorna error", async () => {
     const mock = mockFetch(() => ({ ok: false, status: 503 }));
     try {
-      const client = new HubClient({ source: "graf", hubUrl: "http://hub-test:3007", throwOnError: true });
+      const client = new HubClient({ source: "hermes", hubUrl: "http://hub-test:3007", throwOnError: true });
       await assert.rejects(
         () => client.publish(EVENTS.ORDER_PAID, VALID_PAYLOADS[EVENTS.ORDER_PAID]),
         /Hub publish failed/
@@ -344,7 +344,7 @@ describe("HubClient", () => {
   test("lanza con throwOnError=true en error de red", async () => {
     const mock = mockFetch(() => { throw new Error("Network failure"); });
     try {
-      const client = new HubClient({ source: "graf", hubUrl: "http://nowhere:9999", throwOnError: true });
+      const client = new HubClient({ source: "hermes", hubUrl: "http://nowhere:9999", throwOnError: true });
       await assert.rejects(
         () => client.publish(EVENTS.ORDER_PAID, VALID_PAYLOADS[EVENTS.ORDER_PAID]),
         /Network failure/
@@ -359,7 +359,7 @@ describe("HubClient", () => {
     try {
       const client = new HubClient({ source: "hub" });
       await client.publish(EVENTS.MESSAGE_SENT, VALID_PAYLOADS[EVENTS.MESSAGE_SENT]);
-      assert.ok(mock.calls[0].url.includes("localhost:3007") || mock.calls[0].url.includes("webhooks/hubcentral"));
+      assert.ok(mock.calls[0].url.includes("localhost:3007") || mock.calls[0].url.includes("webhooks/nous"));
     } finally {
       mock.restore();
     }

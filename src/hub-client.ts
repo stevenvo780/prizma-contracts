@@ -8,7 +8,7 @@ export interface PublishOptions {
 }
 
 /**
- * Minimal HubCentral client — publishes events to the orchestrator.
+ * Minimal Nous client — publishes events to the orchestrator.
  * Fault-tolerant by design: a failed publish never throws into business logic
  * unless `throwOnError` is set (principle: connectors are optional).
  */
@@ -34,9 +34,12 @@ export class HubClient {
   async publish(eventType: EventType | string, data: Record<string, unknown>, o: PublishOptions = {}): Promise<boolean> {
     const env = this.envelope(eventType, data, o);
     try {
-      const res = await fetch(`${this.opts.hubUrl || HUB_URL}/webhooks/hubcentral`, {
+      const res = await fetch(`${this.opts.hubUrl || HUB_URL}/webhooks/nous`, {
         method: "POST",
-        headers: { "content-type": "application/json", ...(env.signature ? { "x-cauce-signature": env.signature } : {}) },
+        headers: {
+          "content-type": "application/json",
+          ...(env.signature ? { "x-prizma-signature": env.signature } : {}),
+        },
         body: JSON.stringify(env),
       });
       if (!res.ok && this.opts.throwOnError) throw new Error(`Hub publish failed: ${res.status}`);
@@ -44,7 +47,7 @@ export class HubClient {
     } catch (err) {
       if (this.opts.throwOnError) throw err;
       // optional connector: swallow & let the local system keep working
-      console.warn(`[cauce] hub publish "${eventType}" failed (non-fatal):`, (err as Error).message);
+      console.warn(`[prizma] hub publish "${eventType}" failed (non-fatal):`, (err as Error).message);
       return false;
     }
   }

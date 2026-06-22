@@ -1,47 +1,56 @@
 import { z } from "zod";
 
 /**
- * Canonical event catalog for the Olympo ecosystem (orchestrated by HubCentral).
+ * Canonical event catalog for the Prizma ecosystem (orchestrated by Nous).
  * Derived from the 7 business flows. Each event has a Zod payload schema.
  */
 
 export const EVENTS = {
-  // --- Graf (e-commerce, SSOT: online orders/catalog/online customers) ---
+  // --- Hermes (e-commerce, SSOT: online orders/catalog/online customers) ---
   ORDER_PAID: "pedido.pagado",
   ORDER_PENDING_APPROVAL: "pedido.pendiente_aprobacion",
   ORDER_APPROVED: "pedido.aprobado",
   CUSTOMER_CREATED: "cliente.creado",
-  // --- Sinergia POS (SSOT: physical inventory + in-store sales) ---
+  // --- Talanton POS (SSOT: physical inventory + in-store sales) ---
   POS_SALE_CREATED: "venta_pos.creada",
-  // --- Inventory sync (Graf <-> Sinergia) ---
+  // --- Inventory sync (Hermes <-> Talanton) ---
   INVENTORY_UPDATE: "inventory.update",
-  INVENTORY_SYNC_FROM_GRAF: "inventory.sync_from_graf",
+  INVENTORY_SYNC_FROM_HERMES: "inventory.sync_from_hermes",
   INVENTORY_SYNC_FROM_POS: "inventory.sync_from_pos",
   INVENTORY_SYNCED: "inventory.synced",
-  // --- MeraVuelta (SSOT: delivery state) ---
+  // --- Talaria (SSOT: delivery state) ---
   DELIVERY_CREATE: "delivery.create",
   DELIVERY_CREATED: "delivery.created",
   DELIVERY_STATUS_UPDATE: "delivery.status_update",
   DELIVERY_COMPLETED: "delivery.completed",
-  // --- ApiSigo (e-invoicing) ---
+  // --- Logos (e-invoicing) ---
   INVOICE_CREATE: "invoice.create",
   INVOICE_SENT: "invoice.sent",
-  // --- ApiSoftia (CRM) ---
+  // --- Mnemosyne (CRM) ---
   CUSTOMER_UPDATE: "customer.update",
-  // --- EMW (WhatsApp notifications/campaigns) ---
+  // --- Iris (WhatsApp notifications/campaigns) ---
   NOTIFICATION_WHATSAPP: "notification.whatsapp",
   MESSAGE_SENT: "message.sent",
-  // --- Fiar (credit, SSOT: credit/debt/quota) ---
+  // --- Pistis (credit, SSOT: credit/debt/quota) ---
   CREDIT_CHECK: "credit.check",
   CREDIT_APPROVED: "credit.approved",
   PAYMENT_RECEIVED: "payment.received",
+  // --- Pagos Mercado Pago (SSOT: pasarela de pagos online) ---
+  // Nota: `pedido.pagado` es el evento downstream de negocio que se dispara
+  // cuando `pago.aprobado` corresponde a un pedido de Hermes.
+  PAGO_INICIADO: "pago.iniciado",
+  PAGO_APROBADO: "pago.aprobado",
+  PAGO_RECHAZADO: "pago.rechazado",
+  SUSCRIPCION_ACTIVADA: "suscripcion.activada",
+  SUSCRIPCION_CANCELADA: "suscripcion.cancelada",
 } as const;
 
 export type EventType = (typeof EVENTS)[keyof typeof EVENTS];
 
 export const ServiceSourceSchema = z.enum([
-  "graf", "sinergia", "meravuelta", "fiar", "emw",
-  "apisigo", "apisoftia", "hub", "comercial", "automatizacion", "portal",
+  "nous", "hermes", "iris", "pistis", "talanton", "talaria", "logos", "mnemosyne", "peitho", "talos",
+  "hermes", "talanton", "talaria", "pistis", "iris",
+  "logos", "mnemosyne", "hub", "comercial", "automatizacion", "portal",
 ]);
 export type ServiceSource = z.infer<typeof ServiceSourceSchema>;
 
@@ -75,7 +84,7 @@ export const Payloads = {
     delivery: z.boolean().default(false),
   }),
   [EVENTS.INVENTORY_UPDATE]: z.object({ sku: z.string(), delta: z.number().int(), store: z.string().optional() }),
-  [EVENTS.INVENTORY_SYNC_FROM_GRAF]: z.object({ items: z.array(z.object({ sku: z.string(), stock: z.number().int() })) }),
+  [EVENTS.INVENTORY_SYNC_FROM_HERMES]: z.object({ items: z.array(z.object({ sku: z.string(), stock: z.number().int() })) }),
   [EVENTS.INVENTORY_SYNC_FROM_POS]: z.object({ items: z.array(z.object({ sku: z.string(), stock: z.number().int() })) }),
   [EVENTS.INVENTORY_SYNCED]: z.object({ count: z.number().int(), at: z.string() }),
   [EVENTS.DELIVERY_CREATE]: z.object({
@@ -101,6 +110,70 @@ export const Payloads = {
   [EVENTS.CREDIT_CHECK]: z.object({ customer: CustomerRefSchema, amount: z.number() }),
   [EVENTS.CREDIT_APPROVED]: z.object({ creditId: z.string(), customer: CustomerRefSchema, limit: z.number() }),
   [EVENTS.PAYMENT_RECEIVED]: z.object({ paymentId: z.string(), creditId: z.string().optional(), amount: z.number() }),
+
+  // --- Pagos Mercado Pago ---
+  /**
+   * pago.iniciado — se emite al crear la preferencia/preaprobación en MP.
+   * La llave `externalReference` transporta el identificador de negocio del
+   * recurso que origina el pago (orderId, storeId, userId, etc.).
+   */
+  [EVENTS.PAGO_INICIADO]: z.object({
+    paymentRef: z.string(),
+    gateway: z.literal("mercadopago"),
+    tipo: z.enum(["checkout", "preapproval"]),
+    monto: z.number().nonnegative(),
+    moneda: z.string().default("COP"),
+    externalReference: z.string(),
+    preferenceId: z.string(),
+  }),
+
+  /**
+   * pago.aprobado — se emite al recibir la notificación de pago aprobado de MP.
+   * Cuando el recurso es un pedido de Hermes, Nous dispara también
+   * `pedido.pagado` como evento downstream de negocio.
+   */
+  [EVENTS.PAGO_APROBADO]: z.object({
+    paymentRef: z.string(),
+    gateway: z.string(),
+    monto: z.number().nonnegative(),
+    moneda: z.string().default("COP"),
+    externalReference: z.string(),
+    mpPaymentId: z.string(),
+    status: z.string(),
+  }),
+
+  /**
+   * pago.rechazado — se emite cuando MP notifica que el pago no fue aprobado.
+   */
+  [EVENTS.PAGO_RECHAZADO]: z.object({
+    paymentRef: z.string(),
+    gateway: z.string(),
+    externalReference: z.string(),
+    motivo: z.string(),
+  }),
+
+  /**
+   * suscripcion.activada — se emite cuando una preaprobación de MP queda activa.
+   * `mpPreapprovalId` es el ID de la suscripción en Mercado Pago.
+   */
+  [EVENTS.SUSCRIPCION_ACTIVADA]: z.object({
+    subRef: z.string(),
+    plan: z.string(),
+    monto: z.number().nonnegative(),
+    moneda: z.string().default("COP"),
+    externalReference: z.string(),
+    mpPreapprovalId: z.string(),
+  }),
+
+  /**
+   * suscripcion.cancelada — se emite cuando se cancela una suscripción (por el
+   * usuario, por el sistema, o por notificación de MP).
+   */
+  [EVENTS.SUSCRIPCION_CANCELADA]: z.object({
+    subRef: z.string(),
+    externalReference: z.string(),
+    motivo: z.string(),
+  }),
 } as const;
 
 /** Generic event envelope (matches the inter-service webhook contract). */
@@ -123,3 +196,22 @@ export function validateEvent(env: EventEnvelope): { ok: true } | { ok: false; e
   const res = schema.safeParse(env.data);
   return res.success ? { ok: true } : { ok: false, error: res.error.message };
 }
+
+// ---------------------------------------------------------------------------
+// Tipos derivados para los payloads de Mercado Pago
+// ---------------------------------------------------------------------------
+
+/** Payload de `pago.iniciado` */
+export type PagoIniciadoPayload = z.infer<typeof Payloads[typeof EVENTS.PAGO_INICIADO]>;
+
+/** Payload de `pago.aprobado` */
+export type PagoAprobadoPayload = z.infer<typeof Payloads[typeof EVENTS.PAGO_APROBADO]>;
+
+/** Payload de `pago.rechazado` */
+export type PagoRechazadoPayload = z.infer<typeof Payloads[typeof EVENTS.PAGO_RECHAZADO]>;
+
+/** Payload de `suscripcion.activada` */
+export type SuscripcionActivadaPayload = z.infer<typeof Payloads[typeof EVENTS.SUSCRIPCION_ACTIVADA]>;
+
+/** Payload de `suscripcion.cancelada` */
+export type SuscripcionCanceladaPayload = z.infer<typeof Payloads[typeof EVENTS.SUSCRIPCION_CANCELADA]>;
